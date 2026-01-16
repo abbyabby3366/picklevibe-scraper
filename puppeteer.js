@@ -197,6 +197,7 @@ async function scrapeCourtSite() {
       } else {
         console.log("Sending data to Google Sheets...");
         try {
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
           const response = await fetch(APPS_SCRIPT_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -238,5 +239,10 @@ async function scrapeCourtSite() {
   }
 }
 
-// Run the scraper
-scrapeCourtSite();
+// Export the function for use in the Express server
+module.exports = { scrapeCourtSite };
+
+// Run the scraper if this file is executed directly
+if (require.main === module) {
+  scrapeCourtSite();
+}
