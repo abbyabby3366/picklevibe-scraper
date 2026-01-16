@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs').promises;
+const cron = require('node-cron');
 
 // Import the scraper function from puppeteer.js
 const { scrapeCourtSite } = require('./puppeteer.js');
@@ -25,8 +26,82 @@ let scrapingStatus = {
   isRunning: false,
   lastRun: null,
   lastResult: null,
-  error: null
+  error: null,
+  nextScheduledRun: null,
+  schedulerEnabled: true
 };
+
+// Function to calculate next scheduled run time (11:50 PM Malaysia Time = GMT+8)
+function getNextScheduledRun() {
+  const now = new Date();
+  const malaysiaOffset = 8 * 60; // Malaysia is GMT+8
+  
+  // Get current time in Malaysia
+  const malaysiaTime = new Date(now.getTime() + (now.getTimezoneOffset() + malaysiaOffset) * 60000);
+  
+  // Set to 11:50 PM today
+  let nextRun = new Date(malaysiaTime);
+  nextRun.setHours(23, 50, 0, 0);
+  
+  // If we've already passed 11:50 PM today, schedule for tomorrow
+  if (malaysiaTime >= nextRun) {
+    nextRun.setDate(nextRun.getDate() + 1);
+  }
+  
+  // Convert back to local time
+  return new Date(nextRun.getTime() - (now.getTimezoneOffset() + malaysiaOffset) * 60000);
+}
+
+// Update next scheduled run time
+scrapingStatus.nextScheduledRun = getNextScheduledRun().toISOString();
+
+// Function to run the scraper (used by both manual trigger and scheduled runs)
+async function runScraper(source = 'manual') {
+  if (scrapingStatus.isRunning) {
+    console.log('⏭️ Skipping scrape - already in progress');
+    return;
+  }
+
+  console.log(`🚀 Starting scrape (triggered by: ${source})`);
+  scrapingStatus.isRunning = true;
+  scrapingStatus.error = null;
+
+  try {
+    await scrapeCourtSite();
+    scrapingStatus.lastRun = new Date().toISOString();
+    scrapingStatus.isRunning = false;
+    scrapingStatus.nextScheduledRun = getNextScheduledRun().toISOString();
+    console.log('✅ Scraping completed successfully');
+  } catch (error) {
+    scrapingStatus.isRunning = false;
+    scrapingStatus.error = error.message;
+    scrapingStatus.nextScheduledRun = getNextScheduledRun().toISOString();
+    console.error('❌ Scraping error:', error);
+  }
+}
+
+// Set up cron job to run at 11:50 PM Malaysia Time (GMT+8)
+// Cron runs in the server's local timezone, so we need to calculate the equivalent time
+const setupScheduler = () => {
+  // This cron expression runs at 11:50 PM every day in Malaysia timezone
+  // Format: '50 23 * * *' means at 23:50 (11:50 PM) every day
+  // We'll use timezone option to ensure it runs at Malaysia time
+  const cronExpression = '50 23 * * *';
+  
+  const scheduledTask = cron.schedule(cronExpression, () => {
+    console.log('⏰ Scheduled scrape triggered at 11:50 PM Malaysia Time');
+    runScraper('scheduled');
+  }, {
+    scheduled: true,
+    timezone: "Asia/Kuala_Lumpur"
+  });
+
+  console.log('⏰ Scheduler initialized - scraping will run daily at 11:50 PM Malaysia Time');
+  return scheduledTask;
+};
+
+// Start the scheduler
+const scheduledTask = setupScheduler();
 
 // Routes
 
@@ -56,36 +131,14 @@ app.post('/api/scrape', async (req, res) => {
     });
   }
 
-  scrapingStatus.isRunning = true;
-  scrapingStatus.error = null;
+  // Run the scraper in the background
+  runScraper('manual');
 
-  try {
-    // Run the scraper (this is async) - purposefully NOT awaiting to return response immediately
-    scrapeCourtSite()
-      .then(() => {
-        scrapingStatus.lastRun = new Date().toISOString();
-        scrapingStatus.isRunning = false;
-        console.log('✅ Scraping completed successfully');
-      })
-      .catch((error) => {
-        scrapingStatus.isRunning = false;
-        scrapingStatus.error = error.message;
-        console.error('❌ Scraping error:', error);
-      });
-
-    res.json({
-      message: 'Scraping started successfully',
-      status: 'started'
-    });
-  } catch (error) {
-    scrapingStatus.isRunning = false;
-    scrapingStatus.error = error.message;
-    console.error('Scraping initiation error:', error);
-    res.status(500).json({
-      error: 'Failed to initiate scraping',
-      message: error.message
-    });
-  }
+  res.json({
+    message: 'Scraping started successfully',
+    status: 'started',
+    nextScheduledRun: scrapingStatus.nextScheduledRun
+  });
 });
 
 // Get scraped data

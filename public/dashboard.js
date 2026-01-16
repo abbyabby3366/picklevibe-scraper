@@ -12,6 +12,11 @@ const statsSection = document.getElementById('stats-section');
 const dataSection = document.getElementById('data-section');
 const statsContent = document.getElementById('stats-content');
 const dataContent = document.getElementById('data-content');
+const countdownDisplay = document.getElementById('countdown-display');
+const nextRunTimeEl = document.getElementById('next-run-time');
+
+// Store next scheduled run time
+let nextScheduledRun = null;
 
 // Utility functions
 function showMessage(message, type = 'info') {
@@ -33,6 +38,45 @@ function formatDate(dateString) {
 
 function formatCurrency(amount) {
     return `RM ${amount.toFixed(2)}`;
+}
+
+// Countdown timer update
+function updateCountdown() {
+    if (!nextScheduledRun) {
+        countdownDisplay.textContent = '--:--:--';
+        nextRunTimeEl.textContent = 'Loading...';
+        return;
+    }
+
+    const now = new Date();
+    const nextRun = new Date(nextScheduledRun);
+    const diff = nextRun - now;
+
+    if (diff <= 0) {
+        countdownDisplay.textContent = '00:00:00';
+        nextRunTimeEl.textContent = 'Scraping should start any moment...';
+        return;
+    }
+
+    // Calculate hours, minutes, seconds
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    // Format with leading zeros
+    const formatted = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    countdownDisplay.textContent = formatted;
+
+    // Format the next run time
+    const options = {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+    };
+    nextRunTimeEl.textContent = `Scheduled for: ${nextRun.toLocaleString('en-MY', options)} (Malaysia Time)`;
 }
 
 // Status management
@@ -71,6 +115,13 @@ async function fetchStatus() {
         const response = await fetch(`${API_BASE}/api/status`);
         const status = await response.json();
         updateStatus(status);
+        
+        // Update next scheduled run time
+        if (status.nextScheduledRun) {
+            nextScheduledRun = status.nextScheduledRun;
+            updateCountdown();
+        }
+        
         return status;
     } catch (error) {
         console.error('Failed to fetch status:', error);
@@ -240,6 +291,9 @@ loadDataBtn.addEventListener('click', () => {
     loadStats();
     loadData();
 });
+
+// Update countdown every second
+setInterval(updateCountdown, 1000);
 
 // Auto-refresh status every 30 seconds when page is visible
 setInterval(() => {
