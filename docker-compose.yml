@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  picklevibe-scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: picklevibe-scraper
+    restart: unless-stopped
+    ports:
+      - "3048:3048"
+    environment:
+      - NODE_ENV=production
+      - PORT=3048
+      # Add any other environment variables here
+    volumes:
+      # Persist scraped data
+      - ./data:/app/data
+      # Optional: Mount all_bookings.json if you want it to persist
+      - ./all_bookings.json:/app/all_bookings.json
+    # Security options for Puppeteer in Docker
+    cap_add:
+      - SYS_ADMIN
+    shm_size: '2gb'
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

@@ -14,10 +14,12 @@ async function scrapeCourtSite() {
   try {
     // Launch browser
     const browser = await puppeteer.launch({
-      headless: false, // Set to true for headless mode
+      headless: true, // Run in headless mode for Docker/production
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage", // Important for Docker
+        "--disable-gpu",
         "--ignore-certificate-errors",
         "--ignore-ssl-errors",
         "--ignore-certificate-errors-spki-list",
