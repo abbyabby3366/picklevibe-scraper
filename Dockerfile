@@ -4,6 +4,7 @@ FROM node:20-slim
 # Install necessary dependencies for Puppeteer/Chromium
 RUN apt-get update && apt-get install -y \
     wget \
+    gnupg \
     ca-certificates \
     fonts-liberation \
     libappindicator3-1 \
