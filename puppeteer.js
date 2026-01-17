@@ -9,7 +9,7 @@ const puppeteer = require("puppeteer");
 async function scrapeCourtSite() {
   // --- Send Data to Google Sheets via Apps Script ---
   const APPS_SCRIPT_URL =
-    "https://script.google.com/macros/s/AKfycbzqmU7DLEE55herBKAPuQisW1C2E-6_vYCFp2fN09q0uydlz7_8Z6CHV_3XILmC0tM9/exec";
+    "https://script.google.com/macros/s/AKfycby3_628s_ErKt_cXugkYqJiNJegSfiOGD4xywtT_JDpCz1lRm_4n_-QlFZzBgd7ULId/exec";
 
   try {
     // Launch browser
@@ -199,7 +199,8 @@ async function scrapeCourtSite() {
       } else {
         console.log("Sending data to Google Sheets...");
         try {
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+          const fetch = (...args) =>
+            import("node-fetch").then(({ default: fetch }) => fetch(...args));
           const response = await fetch(APPS_SCRIPT_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
