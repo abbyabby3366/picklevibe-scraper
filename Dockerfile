@@ -40,19 +40,18 @@ COPY . .
 # Create directory for data persistence
 RUN mkdir -p /app/data
 
-# Expose the port the app runs on
-EXPOSE 3048
+# Expose port (Cloud Run will override this)
+EXPOSE 8080
 
-# Set environment variable for Puppeteer to skip downloading Chrome
-# (we'll use the system-installed Chromium)
+# Use Puppeteer's bundled Chromium instead of installing Chrome
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
-# Install Chrome stable
-RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable --no-install-recommends \
+# Install only Chromium (much lighter than full Chrome)
+RUN apt-get update && apt-get install -y \
+    chromium-browser \
+    fonts-liberation \
+    --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Start the application
