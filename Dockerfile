@@ -1,8 +1,15 @@
 # Use official Node.js LTS image - Puppeteer will download its own Chromium
 FROM node:20-slim
 
-# Install minimal system dependencies for Puppeteer (even with bundled Chromium)
+# Install system dependencies required for Puppeteer/Chromium
 RUN apt-get update && apt-get install -y \
+    libnss3 \
+    libnspr4 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
     libgbm1 \
     libxss1 \
     libasound2 \
