@@ -1,27 +1,13 @@
-# Use official Node.js LTS image with Debian (required for Puppeteer)
+# Use official Node.js LTS image - Puppeteer will download its own Chromium
 FROM node:20-slim
 
-# Install necessary dependencies for Puppeteer/Chromium
+# Install minimal system dependencies for Puppeteer (even with bundled Chromium)
 RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    fonts-liberation \
-    libappindicator3-1 \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libcups2 \
-    libdbus-1-3 \
     libgbm1 \
+    libxss1 \
+    libasound2 \
     libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
     libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    xdg-utils \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -42,17 +28,6 @@ RUN mkdir -p /app/data
 
 # Expose port (Cloud Run will override this)
 EXPOSE 8080
-
-# Use Puppeteer's bundled Chromium instead of installing Chrome
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-
-# Install only Chromium (much lighter than full Chrome)
-RUN apt-get update && apt-get install -y \
-    chromium-browser \
-    fonts-liberation \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
 
 # Start the application
 CMD ["npm", "start"]
