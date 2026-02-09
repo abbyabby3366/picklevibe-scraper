@@ -20,6 +20,8 @@ async function scrapeCourtSite() {
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage", // Important for Docker
         "--disable-gpu",
+        "--no-zygote",
+        "--single-process",
         "--ignore-certificate-errors",
         "--ignore-ssl-errors",
         "--ignore-certificate-errors-spki-list",
