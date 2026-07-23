@@ -1,6 +1,85 @@
 require("dotenv").config();
 const axios = require("axios");
 const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
+
+// ── Booking status helpers ──────────────────────────────────────────
+const ACTIVE_STATUSES    = ["confirmed", "completed", "checked-in", "checked in"];
+const CANCELLED_STATUSES = ["cancelled", "canceled", "refunded", "no-show", "no show"];
+
+function isActiveBooking(status) {
+    return ACTIVE_STATUSES.includes((status || "").toLowerCase());
+}
+function isCancelledBooking(status) {
+    return CANCELLED_STATUSES.includes((status || "").toLowerCase());
+}
+
+// ── Synced-bookings ledger (persisted to disk) ──────────────────────
+const SYNCED_FILE = path.join(__dirname, "synced_bookings.json");
+
+function loadSyncedBookings() {
+    try {
+        if (fs.existsSync(SYNCED_FILE)) {
+            return JSON.parse(fs.readFileSync(SYNCED_FILE, "utf8"));
+        }
+    } catch (e) {
+        console.warn("⚠️  Could not read synced_bookings.json, starting fresh:", e.message);
+    }
+    return {};  // { bookingId: { phone, points, price, syncedAt } }
+}
+
+function saveSyncedBookings(ledger) {
+    fs.writeFileSync(SYNCED_FILE, JSON.stringify(ledger, null, 2));
+}
+
+// ── Deduct points for cancelled bookings ────────────────────────────
+async function deductCancelledBookings(cancelledList) {
+    // Filter out 0-point bookings — no need to send a -0 deduction
+    const withPoints = cancelledList.filter((b) => b.points > 0);
+    if (!withPoints.length) return;
+
+    console.log(`\n🔄 Deducting points for ${withPoints.length} cancelled booking(s)...`);
+
+    const deductPayload = withPoints.map((b) => ({
+        phone_number: b.phone,
+        add_points: `-${b.points}`,
+        total_spent: `-${b.price}`,
+        entry_method: "api",
+        subscribe_message: true,
+        send_welcome_message: false,
+        send_points_credit_message: false,
+    }));
+
+    try {
+        const res = await axios.post(
+            `${process.env.JOMREWARDS_API_URL}/api/public/create-user/`,
+            deductPayload,
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-API-Key": process.env.JOMREWARDS_API_KEY,
+                },
+                timeout: 120000,
+            }
+        );
+        const { created = 0, updated = 0, failed = 0 } = res.data.summary || {};
+        console.log(`   Deduct result — Updated: ${updated} | Failed: ${failed}`);
+    } catch (err) {
+        console.error("   ❌ Deduct request failed:", err.response?.data || err.message);
+    }
+}
+
+// ── Phone formatting helper ─────────────────────────────────────────
+function formatPhone(raw) {
+    const normalizedPhone = raw.replace(/[\s\-\(\)]/g, "");
+    let formattedPhone;
+    if (normalizedPhone.startsWith("+")) formattedPhone = normalizedPhone;
+    else if (normalizedPhone.startsWith("60")) formattedPhone = `+${normalizedPhone}`;
+    else if (normalizedPhone.startsWith("0")) formattedPhone = `+6${normalizedPhone}`;
+    else formattedPhone = `+60${normalizedPhone}`;
+    return formattedPhone;
+}
 
 async function syncToJomRewards(bookings) {
     if (!bookings || bookings.length === 0) {
@@ -34,17 +113,57 @@ async function syncToJomRewards(bookings) {
         return parseFloat(cleaned) || 0;
     }
 
+    // ── Load ledger of previously synced bookings ──
+    const ledger = loadSyncedBookings();
 
-    const uniqueCustomers = {};
+    // ── Separate active vs cancelled bookings ──
+    const activeBookings = [];
+    const cancelledBookings = [];
+    let skippedUnknownStatus = 0;
 
     for (const booking of bookings) {
+        const st = (booking.status || "").trim();
+        if (isActiveBooking(st)) {
+            activeBookings.push(booking);
+        } else if (isCancelledBooking(st)) {
+            cancelledBookings.push(booking);
+        } else {
+            // Unknown status — treat as active (safe default)
+            activeBookings.push(booking);
+            skippedUnknownStatus++;
+        }
+    }
+
+    console.log(`   Active bookings : ${activeBookings.length}`);
+    console.log(`   Cancelled       : ${cancelledBookings.length}`);
+    if (skippedUnknownStatus) console.log(`   Unknown status  : ${skippedUnknownStatus} (treated as active)`);
+
+    // ── Detect previously-synced bookings that are now cancelled ──
+    const toDeduct = [];
+    for (const booking of cancelledBookings) {
+        const bid = booking.bookingId;
+        if (ledger[bid]) {
+            toDeduct.push({
+                bookingId: bid,
+                phone: ledger[bid].phone,
+                points: ledger[bid].points,
+            });
+            console.log(`   ⛔ Booking ${bid} was synced but now CANCELLED → will deduct ${ledger[bid].points} pts from ${ledger[bid].phone}`);
+            delete ledger[bid];  // Remove from ledger after deducting
+        }
+    }
+
+    // Fire the deductions
+    await deductCancelledBookings(toDeduct);
+
+    // ── Build unique customers from ACTIVE bookings only ──
+    const uniqueCustomers = {};
+
+    for (const booking of activeBookings) {
         const phone = booking.customer?.phone;
         if (!phone || !phone.trim()) continue;
 
-        const normalizedPhone = phone.replace(/[\s\-\(\)]/g, "");
-        let formattedPhone;
-
-        if (normalizedPhone.startsWith("+")) formattedPhone = normalizedPhone; else if (normalizedPhone.startsWith("60")) formattedPhone = `+${normalizedPhone}`; else if (normalizedPhone.startsWith("0")) formattedPhone = `+6${normalizedPhone}`; else formattedPhone = `+60${normalizedPhone}`;
+        const formattedPhone = formatPhone(phone);
 
         if (formattedPhone.length < 10 || formattedPhone.length > 16) {
             console.warn(`Skipping invalid phone: ${phone}`);
@@ -53,9 +172,17 @@ async function syncToJomRewards(bookings) {
 
         const phoneForApi = formattedPhone.replace(/^\+/, "");
 
-
         const priceRm = parsePrice(booking.price);
         const bookingPoints = pointsPerRm > 0 ? Math.floor(priceRm * pointsPerRm) : 0;
+
+        // Record in ledger
+        ledger[booking.bookingId] = {
+            phone: phoneForApi,
+            points: bookingPoints,
+            price: priceRm,
+            status: booking.status,
+            syncedAt: new Date().toISOString(),
+        };
 
         if (!uniqueCustomers[formattedPhone]) {
             const nameParts = (booking.customer?.name || "").trim().split(" ");
@@ -77,12 +204,14 @@ async function syncToJomRewards(bookings) {
                 uniqueCustomers[formattedPhone].email = booking.customer.email.trim();
             }
         } else {
-
             uniqueCustomers[formattedPhone].add_points += bookingPoints;
             uniqueCustomers[formattedPhone].total_spent += priceRm;
             uniqueCustomers[formattedPhone]._bookingCount++;
         }
     }
+
+    // ── Persist the updated ledger ──
+    saveSyncedBookings(ledger);
 
     const usersArray = Object.values(uniqueCustomers).map((u) => {
         const {_bookingCount, ...rest} = u;
@@ -137,6 +266,7 @@ async function syncToJomRewards(bookings) {
     console.log(`Created : ${totalCreated}`);
     console.log(`Updated : ${totalUpdated}`);
     console.log(`Failed  : ${totalFailed}`);
+    console.log(`Deducted: ${toDeduct.length} cancelled booking(s)`);
     console.log(`${"=".repeat(50)}\n`);
 }
 
